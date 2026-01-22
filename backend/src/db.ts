@@ -29,3 +29,17 @@ export async function testDbConnection() {
     client.release();
   }
 }
+
+
+export async function closeDbPool() {
+  if (pool) {
+    await pool.end();
+    pool = null;
+    console.log("Database pool closed");
+  }
+}
+
+
+export async function query(sql: string, params?: any[]) {
+  return getPool().query(sql, params);
+}
