@@ -3,7 +3,7 @@ dotenv.config();
 
 import Fastify from "fastify";
 import { testDbConnection, closeDbPool, query } from "./db.js";
-import { startRun } from "./activity/runs.service.js";
+import { endRun, startRun } from "./activity/runs.service.js";
 
 const app = Fastify({ logger: true });
 
@@ -60,6 +60,36 @@ app.post<{
 });
 
 
+app.post<{
+  Body: {
+    runId: number;
+  };
+}>("/runs/end", async (request, reply) => {
+  const { runId } = request.body;
+
+  if (!runId) {
+    return reply.status(400).send({ error: "runId is required" });
+  }
+
+  try {
+    const result = await endRun(runId);
+    return reply.status(200).send(result);
+  } catch (err: any) {
+    if (err.message === "Run not found") {
+      return reply.status(404).send({ error: err.message });
+    }
+
+    if (err.message === "Run is not active") {
+      return reply.status(409).send({ error: err.message });
+    }
+
+    request.log.error(err);
+    return reply.status(500).send({ error: "Internal server error" });
+  }
+});
+
+
+
 
 /* close pool function */
 async function shutdown(signal: string) {
@@ -82,8 +112,8 @@ async function start() {
     await testDbConnection();
     console.log("database ready");
 
-    await app.listen({ port: 3312 });
-    console.log("Backend running on http://localhost:3312");
+    await app.listen({ port: 1738 });
+    console.log("Backend running on http://localhost:1738");
   } catch (err) {
     console.error("Startup failed:", err);
     process.exit(1);
