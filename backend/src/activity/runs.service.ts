@@ -1,15 +1,120 @@
 import { query } from "../db.js";
 
-/**
- * Start a new run for a user
- * - Ensures only one active run per user
- * - Uses transaction + row locking
- * Add a GPS point to an active run
- * - Validates run state
- * - Enforces GPS sanity
- * - Prevents time regression
- * - Blocks unrealistic movement (anti-cheat)
- */
+export type GPSPoint = {
+  lat: number;
+  lng: number;
+  timestamp: string; // ISO string
+  accuracy: number;
+};
+
+
+export async function addRunPoints(runId: number, points: GPSPoint[]) {
+  if (!points || points.length === 0) {
+    throw new Error("No points provided");
+  }
+
+  // Begin transaction
+  await query("BEGIN");
+
+  try {
+    // 1️⃣ Lock the run for update
+    const runRes = await query(
+      `
+      SELECT id, status
+      FROM activity.runs
+      WHERE id = $1
+      FOR UPDATE
+      `,
+      [runId]
+    );
+
+    if (runRes.rowCount === 0) {
+      throw new Error("Run not found");
+    }
+
+    const run = runRes.rows[0];
+
+    if (run.status !== "in_progress") {
+      throw new Error("Cannot add points to a completed or invalid run");
+    }
+
+    // 2️⃣ Validate each point
+    const MAX_POINT_ACCURACY_M = 25;
+    const MAX_INSTANT_SPEED_MPS = 10.0;
+
+    let lastPoint: GPSPoint | null = null;
+    const now = new Date();
+
+    for (const point of points) {
+      if (
+        point.accuracy > MAX_POINT_ACCURACY_M ||
+        point.lat < -90 || point.lat > 90 ||
+        point.lng < -180 || point.lng > 180
+      ) {
+        throw new Error(`Invalid point: ${JSON.stringify(point)}`);
+      }
+
+      // Optional: check monotonic timestamps & speed between consecutive points
+      if (lastPoint) {
+        const t1 = new Date(lastPoint.timestamp).getTime();
+        const t2 = new Date(point.timestamp).getTime();
+        const dt = (t2 - t1) / 1000; // seconds
+
+        if (dt <= 0) {
+          throw new Error("Timestamps must increase");
+        }
+
+        // Approx speed check
+        const R = 6371000; // Earth radius in meters
+        const dLat = ((point.lat - lastPoint.lat) * Math.PI) / 180;
+        const dLng = ((point.lng - lastPoint.lng) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lastPoint.lat * Math.PI) / 180) *
+            Math.cos((point.lat * Math.PI) / 180) *
+            Math.sin(dLng / 2) ** 2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = R * c; // meters
+        const speed = distance / dt;
+
+        if (speed > MAX_INSTANT_SPEED_MPS) {
+          throw new Error(`Unrealistic speed detected between points`);
+        }
+      }
+
+      lastPoint = point;
+    }
+
+    // 3️⃣ Insert points in batch
+    const values: any[] = [];
+    const placeholders: string[] = [];
+
+    points.forEach((p, idx) => {
+      placeholders.push(`($1, $${idx * 4 + 2}, $${idx * 4 + 3}, $${idx * 4 + 4})`);
+      values.push(runId, p.lat, p.lng, new Date(p.timestamp), p.accuracy);
+    });
+
+    // We’ll insert one by one in a loop for simplicity
+    for (const p of points) {
+      await query(
+        `
+        INSERT INTO activity.run_points (run_id, position, recorded_at, accuracy_m)
+        VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, $4, $5)
+        `,
+        [runId, p.lng, p.lat, new Date(p.timestamp), p.accuracy]
+      );
+    }
+
+    await query("COMMIT");
+
+    return points.length;
+  } catch (err: any) {
+    await query("ROLLBACK");
+    throw err;
+  }
+}
+
+
 
 export async function startRun(userId: number) {
   console.log("Starting run for userId:", userId);
@@ -156,8 +261,7 @@ export async function addRunPoint(
       INSERT INTO activity.run_points (
         run_id,
         recorded_at,
-        position,
-        accuracy_m
+        position
       )e
       VALUES (
         $1,

@@ -3,7 +3,7 @@ dotenv.config();
 
 import Fastify from "fastify";
 import { testDbConnection, closeDbPool, query } from "./db.js";
-import { endRun, startRun } from "./activity/runs.service.js";
+import { addRunPoints, endRun, startRun } from "./activity/runs.service.js";
 
 const app = Fastify({ logger: true });
 
@@ -27,6 +27,35 @@ app.get("/health", async () => {
     return { status: "degraded" };
   }
 });
+
+
+app.post<{
+  Params: { runId: string };
+  Body: {
+    points: {
+      lat: number;
+      lng: number;
+      timestamp: string;
+      accuracy: number;
+    }[];
+  };
+}>("/runs/:runId/points", async (request, reply) => {
+  const { runId } = request.params;
+  const { points } = request.body;
+
+  if (!points || !Array.isArray(points) || points.length === 0) {
+    return reply.status(400).send({ error: "points array is required" });
+  }
+
+  try {
+    const ingestedCount = await addRunPoints(Number(runId), points);
+    return reply.status(201).send({ ingested: ingestedCount });
+  } catch (err: any) {
+    request.log.error(err);
+    return reply.status(500).send({ error: err.message || "Internal server error" });
+  }
+});
+
 
 
 app.post<{
