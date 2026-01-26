@@ -261,12 +261,14 @@ export async function addRunPoint(
       INSERT INTO activity.run_points (
         run_id,
         recorded_at,
-        position
+        position,
+        accuracy_m
       )e
       VALUES (
         $1,
         $2,
         ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography,
+        $5
         $5
       )
       RETURNING id, recorded_at

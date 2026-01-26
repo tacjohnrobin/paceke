@@ -1,11 +1,15 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { testDbConnection, closeDbPool, query } from "./db.js";
 import { addRunPoints, endRun, startRun } from "./activity/runs.service.js";
 
+
 const app = Fastify({ logger: true });
+
+await app.register(runRoutes);
+
 
 app.addContentTypeParser(
   "application/json",
@@ -117,6 +121,64 @@ app.post<{
   }
 });
 
+
+export async function runRoutes(fastify: FastifyInstance) {
+fastify.get("/runs/:id/summary", async (request, reply) => {
+const runId = Number((request.params as any).id);
+
+
+if (!Number.isInteger(runId)) {
+return reply.code(400).send({ error: "Invalid run id" });
+}
+
+
+const { rows } = await query(
+`
+SELECT
+id,
+status,
+started_at,
+ended_at,
+total_distance_m,
+EXTRACT(EPOCH FROM (ended_at - started_at)) AS duration_seconds
+FROM activity.runs
+WHERE id = $1
+`,
+[runId]
+);
+
+
+if (rows.length === 0) {
+return reply.code(404).send({ error: "Run not found" });
+}
+
+
+const run = rows[0];
+
+
+const durationSeconds =
+run.duration_seconds !== null
+? Number(run.duration_seconds)
+: null;
+
+
+const averageSpeedMps =
+durationSeconds && durationSeconds > 0
+? run.total_distance_m / durationSeconds
+: null;
+
+
+return reply.send({
+runId: run.id,
+status: run.status,
+startedAt: run.started_at,
+endedAt: run.ended_at,
+durationSeconds,
+distanceMeters: run.total_distance_m,
+averageSpeedMps
+});
+});
+}
 
 
 
