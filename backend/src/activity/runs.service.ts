@@ -1,4 +1,5 @@
 import { query } from "../db.js";
+import { addRunTiles } from "./tiles.service.js";
 
 export type GPSPoint = {
   lat: number;
@@ -13,11 +14,10 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
     throw new Error("No points provided");
   }
 
-  // Begin transaction
   await query("BEGIN");
 
   try {
-    // 1️⃣ Lock the run for update
+    /* 1️⃣ Lock run */
     const runRes = await query(
       `
       SELECT id, status
@@ -32,18 +32,36 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
       throw new Error("Run not found");
     }
 
-    const run = runRes.rows[0];
-
-    if (run.status !== "in_progress") {
+    if (runRes.rows[0].status !== "in_progress") {
       throw new Error("Cannot add points to a completed or invalid run");
     }
 
-    // 2️⃣ Validate each point
+    /* 2️⃣ Fetch last DB point */
+    const lastPointRes = await query(
+      `
+      SELECT
+        ST_Y(position::geometry) AS lat,
+        ST_X(position::geometry) AS lng,
+        recorded_at AS timestamp
+      FROM activity.run_points
+      WHERE run_id = $1
+      ORDER BY recorded_at DESC
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [runId]
+    );
+
+    let lastPoint: GPSPoint | null =
+      lastPointRes.rowCount ?? 0 > 0
+        ? lastPointRes.rows[0]
+        : null;
+
     const MAX_POINT_ACCURACY_M = 25;
     const MAX_INSTANT_SPEED_MPS = 10.0;
 
-    let lastPoint: GPSPoint | null = null;
-    const now = new Date();
+    let distanceDelta = 0;
+    let ingested = 0;
 
     for (const point of points) {
       if (
@@ -54,66 +72,78 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
         throw new Error(`Invalid point: ${JSON.stringify(point)}`);
       }
 
-      // Optional: check monotonic timestamps & speed between consecutive points
       if (lastPoint) {
         const t1 = new Date(lastPoint.timestamp).getTime();
         const t2 = new Date(point.timestamp).getTime();
-        const dt = (t2 - t1) / 1000; // seconds
+        const dt = (t2 - t1) / 1000;
 
         if (dt <= 0) {
           throw new Error("Timestamps must increase");
         }
 
-        // Approx speed check
-        const R = 6371000; // Earth radius in meters
-        const dLat = ((point.lat - lastPoint.lat) * Math.PI) / 180;
-        const dLng = ((point.lng - lastPoint.lng) * Math.PI) / 180;
+        // Haversine (single source of truth)
+        const R = 6371000;
+        const toRad = (d: number) => (d * Math.PI) / 180;
+
+        const dLat = toRad(point.lat - lastPoint.lat);
+        const dLng = toRad(point.lng - lastPoint.lng);
+
         const a =
           Math.sin(dLat / 2) ** 2 +
-          Math.cos((lastPoint.lat * Math.PI) / 180) *
-            Math.cos((point.lat * Math.PI) / 180) *
+          Math.cos(toRad(lastPoint.lat)) *
+            Math.cos(toRad(point.lat)) *
             Math.sin(dLng / 2) ** 2;
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const distance = R * c; // meters
+
+        const distance = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         const speed = distance / dt;
 
         if (speed > MAX_INSTANT_SPEED_MPS) {
-          throw new Error(`Unrealistic speed detected between points`);
+          throw new Error("Unrealistic speed detected");
         }
+
+        distanceDelta += distance;
       }
 
-      lastPoint = point;
-    }
-
-    // 3️⃣ Insert points in batch
-    const values: any[] = [];
-    const placeholders: string[] = [];
-
-    points.forEach((p, idx) => {
-      placeholders.push(`($1, $${idx * 4 + 2}, $${idx * 4 + 3}, $${idx * 4 + 4})`);
-      values.push(runId, p.lat, p.lng, new Date(p.timestamp), p.accuracy);
-    });
-
-    // We’ll insert one by one in a loop for simplicity
-    for (const p of points) {
       await query(
         `
-        INSERT INTO activity.run_points (run_id, position, recorded_at, accuracy_m)
-        VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, $4, $5)
+        INSERT INTO activity.run_points
+          (run_id, position, recorded_at, accuracy_m)
+        VALUES
+          ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, $4, $5)
         `,
-        [runId, p.lng, p.lat, new Date(p.timestamp), p.accuracy]
+        [runId, point.lng, point.lat, new Date(point.timestamp), point.accuracy]
+      );
+
+      lastPoint = point;
+      ingested++;
+    }
+
+    /* 3️⃣ Update cached distance ONCE */
+    if (distanceDelta > 0) {
+      await query(
+        `
+        UPDATE activity.runs
+        SET total_distance_m = total_distance_m + $1
+        WHERE id = $2
+        `,
+        [distanceDelta, runId]
       );
     }
 
-    await query("COMMIT");
+    /* 4️⃣ Capture tiles (geohash-based) */
+await addRunTiles(
+  runId,
+  points.map(p => ({ lat: p.lat, lng: p.lng, timestamp: p.timestamp }))
+);
 
-    return points.length;
-  } catch (err: any) {
+
+    await query("COMMIT");
+    return ingested;
+  } catch (err) {
     await query("ROLLBACK");
     throw err;
   }
 }
-
 
 
 export async function startRun(userId: number) {

@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "ngeohash": "^0.6.3"
+  },
+  "devDependencies": {
+    "@types/ngeohash": "^0.6.8"
+  }
+}
