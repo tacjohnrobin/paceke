@@ -1,5 +1,5 @@
-// src/activity/tile-area.service.ts
-import ngeohash from "ngeohash";
+
+
 import { query } from "../db.js";
 
 /**
@@ -8,9 +8,7 @@ import { query } from "../db.js";
  */
 const TILE_AREA_CACHE = new Map<string, number>();
 
-/**
- * Computes the area (m²) of a single geohash tile using PostGIS
- */
+
 async function computeGeohashAreaM2(
   geohash: string
 ): Promise<number> {

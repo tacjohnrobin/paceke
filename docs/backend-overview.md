@@ -2,6 +2,13 @@
 
 This document provides an overview of the backend API endpoints currently implemented in the project, along with example requests for testing each endpoint.
 
+## Technical Stack
+
+- **Framework**: Fastify (high-performance web framework)
+- **Language**: TypeScript with Node.js runtime
+- **Database**: PostgreSQL with PostGIS extension
+- **Spatial Indexing**: Geohash-based tile system
+
 ## Endpoints
 
 ### 1. Health Check
