@@ -133,7 +133,7 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
     /* 4️⃣ Capture tiles (geohash-based) */
 await addRunTiles(
   runId,
-  points.map(p => ({ lat: p.lat, lng: p.lng, timestamp: p.timestamp }))
+  points.map(p => ({ lat: p.lat, lng: p.lng, timestamp: p.timestamp, accuracy: p.accuracy }))
 );
 
 

@@ -1,31 +1,38 @@
 // src/activity/tiles.service.ts
-import ngeohash from "ngeohash";
 import { query } from "../db.js";
+import { pointToGeohash } from "./utils/geohash.util.js";
+import type { GPSPoint } from "./runs.service.js";
 
 
-const GEOHASH_PRECISION = 7; // ~150m x 150m
+const TILE_PRECISION = 7; // ~150m tiles (tune later)
 
 export async function addRunTiles(
   runId: number,
-  points: { lat: number; lng: number; timestamp: string }[]
-) {
-  const tiles = new Set<string>();
+  points: GPSPoint[]
+): Promise<number> {
+  let inserted = 0;
 
-  for (const p of points) {
-    const tile = ngeohash.encode(p.lat, p.lng, GEOHASH_PRECISION);
-    tiles.add(tile);
-  }
+  for (const point of points) {
+    const geohash = pointToGeohash(
+      point.lat,
+      point.lng,
+      TILE_PRECISION
+    );
 
-  for (const tile of tiles) {
-    await query(
+    const res = await query(
       `
-      INSERT INTO activity.run_tiles (run_id, geohash)
-      VALUES ($1, $2)
+      INSERT INTO activity.run_tiles (run_id, geohash, precision)
+      VALUES ($1, $2, $3)
       ON CONFLICT DO NOTHING
       `,
-      [runId, tile]
+      [runId, geohash, TILE_PRECISION]
     );
+
+    if (res.rowCount === 1) {
+      inserted++;
+    }
   }
 
-  return tiles.size;
+  return inserted;
 }
+

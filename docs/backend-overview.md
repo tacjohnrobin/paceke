@@ -10,6 +10,7 @@ This document provides an overview of the backend API endpoints currently implem
 - **Description:** Checks the health of the backend service.
 - **Response:** `{ "status": "ok" }` or `{ "status": "degraded" }`
 - **Test Example:**
+
   ```bash
   curl http://localhost:1738/health
   ```
@@ -21,13 +22,16 @@ This document provides an overview of the backend API endpoints currently implem
 - **POST** `/runs/start`
 - **Description:** Starts a new run for a user.
 - **Body:**
+
   ```json
   {
-  	"userId": 123
+   "userId": 123
   }
   ```
+
 - **Response:** Run object (JSON)
 - **Test Example:**
+
   ```bash
   curl -X POST http://localhost:1738/runs/start \
     -H "Content-Type: application/json" \
@@ -42,20 +46,23 @@ This document provides an overview of the backend API endpoints currently implem
 - **Description:** Adds GPS points to a specific run.
 - **Params:** `runId` (in URL)
 - **Body:**
+
   ```json
   {
-  	"points": [
-  		{
-  			"lat": 40.7128,
-  			"lng": -74.006,
-  			"timestamp": "2026-01-30T12:00:00Z",
-  			"accuracy": 5
-  		}
-  	]
+   "points": [
+    {
+     "lat": 40.7128,
+     "lng": -74.006,
+     "timestamp": "2026-01-30T12:00:00Z",
+     "accuracy": 5
+    }
+   ]
   }
   ```
+
 - **Response:** `{ "ingested": <number> }`
 - **Test Example:**
+
   ```bash
   curl -X POST http://localhost:1738/runs/1/points \
     -H "Content-Type: application/json" \
@@ -69,13 +76,16 @@ This document provides an overview of the backend API endpoints currently implem
 - **POST** `/runs/end`
 - **Description:** Ends an active run.
 - **Body:**
+
   ```json
   {
-  	"runId": 1
+   "runId": 1
   }
   ```
+
 - **Response:** Ended run summary (JSON)
 - **Test Example:**
+
   ```bash
   curl -X POST http://localhost:1738/runs/end \
     -H "Content-Type: application/json" \
@@ -90,18 +100,21 @@ This document provides an overview of the backend API endpoints currently implem
 - **Description:** Retrieves a summary of a specific run.
 - **Params:** `id` (in URL)
 - **Response:**
+
   ```json
   {
-  	"runId": 1,
-  	"status": "active",
-  	"startedAt": "2026-01-30T12:00:00Z",
-  	"endedAt": "2026-01-30T12:30:00Z",
-  	"durationSeconds": 1800,
-  	"distanceMeters": 5000,
-  	"averageSpeedMps": 2.78
+   "runId": 1,
+   "status": "active",
+   "startedAt": "2026-01-30T12:00:00Z",
+   "endedAt": "2026-01-30T12:30:00Z",
+   "durationSeconds": 1800,
+   "distanceMeters": 5000,
+   "averageSpeedMps": 2.78
   }
   ```
+
 - **Test Example:**
+
   ```bash
   curl http://localhost:1738/runs/1/summary
   ```
