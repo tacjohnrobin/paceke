@@ -1,16 +1,17 @@
-// src/activity/run-completion.service.ts
 import { query } from "../db.js";
-import { claimGlobalTiles } from "./global-tiles.service.js";
-import { getRunAreaM2 } from "./tile-area.service.js";
 
-export async function completeRun(runId: number, userId: number) {
+const TILE_AREA_M2_BY_PRECISION: Record<number, number> = {
+  7: 23409, // ~153m × 153m
+};
+
+export async function completeRun(runId: number) {
   await query("BEGIN");
 
   try {
-    
-    const res = await query(
+    // 1️⃣ Lock run
+    const runRes = await query(
       `
-      SELECT status
+      SELECT id, status
       FROM activity.runs
       WHERE id = $1
       FOR UPDATE
@@ -18,33 +19,60 @@ export async function completeRun(runId: number, userId: number) {
       [runId]
     );
 
-    if (res.rowCount === 0) {
+    if (runRes.rowCount === 0) {
       throw new Error("Run not found");
     }
 
-    if (res.rows[0].status !== "in_progress") {
+    if (runRes.rows[0].status !== "in_progress") {
       throw new Error("Run is not in progress");
     }
 
-    // inside transaction
-const runAreaM2 = await getRunAreaM2(runId);
+    // 2️⃣ Count tiles by precision
+    const tilesRes = await query(
+      `
+      SELECT
+        precision,
+        COUNT(*) AS tile_count
+      FROM activity.run_tiles
+      WHERE run_id = $1
+      GROUP BY precision
+      `,
+      [runId]
+    );
 
-const claimedTiles = await claimGlobalTiles(runId, userId);
+    let totalAreaM2 = 0;
 
-await query(
-  `
-  UPDATE activity.runs
-  SET
-    status = 'completed',
-    ended_at = NOW(),
-    run_area_m2 = $2
-  WHERE id = $1
-  `,
-  [runId, runAreaM2]
-);
+    for (const row of tilesRes.rows) {
+      const precision = Number(row.precision);
+      const count = Number(row.tile_count);
+
+      const tileArea = TILE_AREA_M2_BY_PRECISION[precision];
+      if (!tileArea) {
+        throw new Error(`Unsupported tile precision: ${precision}`);
+      }
+
+      totalAreaM2 += count * tileArea;
+    }
+
+    // 3️⃣ Persist area + complete run
+    await query(
+      `
+      UPDATE activity.runs
+      SET
+        run_area_m2 = $1,
+        status = 'completed',
+        completed_at = NOW()
+      WHERE id = $2
+      `,
+      [totalAreaM2, runId]
+    );
 
     await query("COMMIT");
-    return runAreaM2;
+
+    return {
+      runId,
+      runAreaM2: totalAreaM2,
+    };
   } catch (err) {
     await query("ROLLBACK");
     throw err;

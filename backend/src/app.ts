@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import Fastify, { type FastifyInstance } from "fastify";
+import { runsRoutes } from "./activity/runs.routes.js";
 import { testDbConnection, closeDbPool, query } from "./db.js";
 import { addRunPoints, endRun, startRun } from "./activity/runs.service.js";
 
@@ -9,6 +10,7 @@ import { addRunPoints, endRun, startRun } from "./activity/runs.service.js";
 const app = Fastify({ logger: true });
 
 await app.register(runRoutes);
+await app.register(runsRoutes);
 
 
 app.addContentTypeParser(

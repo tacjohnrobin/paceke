@@ -1,5 +1,11 @@
+import fastify from "fastify";
 import { query } from "../db.js";
 import { addRunTiles } from "./tiles.service.js";
+
+
+const app = fastify();
+
+
 
 export type GPSPoint = {
   lat: number;
@@ -118,7 +124,6 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
       ingested++;
     }
 
-    /* 3️⃣ Update cached distance ONCE */
     if (distanceDelta > 0) {
       await query(
         `
@@ -130,7 +135,6 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
       );
     }
 
-    /* 4️⃣ Capture tiles (geohash-based) */
 await addRunTiles(
   runId,
   points.map(p => ({ lat: p.lat, lng: p.lng, timestamp: p.timestamp, accuracy: p.accuracy }))
@@ -400,4 +404,6 @@ export async function endRun(runId: number) {
     throw err;
   }
 }
+
+
 
