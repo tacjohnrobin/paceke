@@ -4,12 +4,16 @@ import { pointToGeohash } from "./utils/geohash.util.js";
 import type { GPSPoint } from "./runs.service.js";
 
 
-const TILE_PRECISION = 7; // ~150m tiles (tune later)
+export const TILE_PRECISION = 7; // ~150m tiles <<tune later for auto zoom>>
 
 export async function addRunTiles(
   runId: number,
   points: GPSPoint[]
 ): Promise<number> {
+  if (!points || points.length === 0) {
+    return 0;
+  }
+
   let inserted = 0;
 
   for (const point of points) {

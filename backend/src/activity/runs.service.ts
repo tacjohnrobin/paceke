@@ -1,6 +1,6 @@
 import fastify from "fastify";
 import { query } from "../db.js";
-import { addRunTiles } from "./tiles.service.js";
+import { addRunTiles, TILE_PRECISION } from "./tiles.service.js";
 
 
 const app = fastify();
@@ -23,7 +23,6 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
   await query("BEGIN");
 
   try {
-    /* 1️⃣ Lock run */
     const runRes = await query(
       `
       SELECT id, status
@@ -42,7 +41,6 @@ export async function addRunPoints(runId: number, points: GPSPoint[]) {
       throw new Error("Cannot add points to a completed or invalid run");
     }
 
-    /* 2️⃣ Fetch last DB point */
     const lastPointRes = await query(
       `
       SELECT
@@ -201,7 +199,6 @@ export async function endRun(runId: number) {
   await query("BEGIN");
 
   try {
-    /* Lock run */
     const runResult = await query(
       `
       SELECT id, started_at, status
@@ -222,7 +219,6 @@ export async function endRun(runId: number) {
       throw new Error("Run is not active");
     }
 
-    /* Compute distance */
     const distanceResult = await query(
       `
       SELECT
@@ -239,15 +235,11 @@ export async function endRun(runId: number) {
     );
 
     const totalDistance = distanceResult.rows[0].distance_m;
-
-    /* Compute duration */
     const endedAt = new Date();
-
     const durationSeconds = Math.floor(
       (endedAt.getTime() - new Date(run.started_at).getTime()) / 1000
     );
 
-    /*  Update run */
     await query(
       `
       UPDATE activity.runs
