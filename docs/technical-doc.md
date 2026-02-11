@@ -44,12 +44,12 @@ PaceKE is a location-based competitive running game that transforms real-world m
   - Utilities providing shared geospatial calculations
   - Clear separation of concerns for independent testing and scaling
   
-- **Database Abstraction Layer**: 
+- **Database Abstraction Layer**:
   - Abstracted query builder/ORM for maintainability and potential future database migrations
   - Connection pooling to manage concurrent database connections efficiently
   - Prepared statements for SQL injection protection and performance
   
-- **Transaction Management**: 
+- **Transaction Management**:
   - Run completion wrapped in SERIALIZABLE transactions to prevent race conditions during concurrent tile claims
   - BEGIN/COMMIT/ROLLBACK blocks ensuring atomic operations across multiple table updates
   - Isolation levels configured to handle high-concurrency scenarios fairly
@@ -77,8 +77,79 @@ PaceKE is a location-based competitive running game that transforms real-world m
 
 ## Key Modules
 
-- **global-tiles.service.ts**: Manages global tile discovery and ownership.
-- **run-completion.service.ts**: Handles the logic for completing runs and updating tile ownership.
-- **tiles.service.ts**: Provides tile-related utilities and queries.
+- **runs.service.ts**: Core run lifecycle management including starting runs, adding GPS points, and ending runs. Validates GPS data, computes distances using Haversine formula, and manages database transactions.
+- **run-completion.service.ts**: Handles run completion logic, including tile aggregation by precision level and area calculation. Wraps all operations in serializable transactions for safety.
+- **tiles.service.ts**: Manages tile assignment for GPS points, converting lat/lng coordinates to geohashes and storing run-tile associations.
 - **geohash.util.ts**: Utility functions for geohash encoding/decoding and spatial calculations.
 
+## Key Implementation Details
+
+### Run Lifecycle
+
+**Starting a Run** (`runs.service.ts::startRun`)
+
+- Creates a new run record with `in_progress` status
+- Associates run with a user
+- Records `started_at` timestamp
+- Validates that user doesn't have an existing active run (prevents concurrent runs)
+
+**Adding GPS Points** (`runs.service.ts::addRunPoints`)
+
+- Validates each point (accuracy ≤ 25m, valid coordinates, ascending timestamps)
+- Prevents unrealistic speeds (>10 m/s) to detect GPS spoofing/errors
+- Uses Haversine formula to compute distances between consecutive points
+- Accumulates `total_distance_m` on the run record
+- Delegates tile assignment to tiles service for each point batch
+- All operations wrapped in transaction with run lock (`FOR UPDATE`)
+
+**Ending a Run** (`runs.service.ts::endRun`)
+
+- Marks run as `ended` with `ended_at` timestamp
+- Finalizes any pending operations
+
+**Completing a Run** (`run-completion.service.ts::completeRun`)
+
+- Locks the run for exclusive access (`FOR UPDATE`)
+- Counts distinct tiles collected during the run, grouped by precision
+- Multiplies tile count by area per tile to compute total `run_area_m2`
+- Updates run status to `completed`
+- Uses `SERIALIZABLE` isolation level to prevent race conditions
+- Rolls back entire transaction if any step fails
+
+### Tile System
+
+**Tile Assignment** (`tiles.service.ts::addRunTiles`)
+
+- Converts each GPS point to a geohash at precision 7 (~150m × 150m)
+- Uses `ON CONFLICT DO NOTHING` to idempotently handle duplicate tiles for a run
+- Returns count of newly discovered tiles
+
+**Tile Area Calculation**
+
+- Precision 7 geohash tiles: ~23,409 m² (≈153m × 153m)
+- Total run area = sum of (tile_count × area_per_precision)
+- Can be extended to support multiple precision levels
+
+### Run Summary
+
+**Summary Endpoint** (`app.ts::GET /runs/:id/summary`)
+
+- Returns run metadata (status, timestamps)
+- Computes duration in seconds
+- Calculates average speed if run is completed
+- Useful for UI display of run statistics
+
+### Database Structure
+
+Key tables involved:
+
+- `activity.runs`: Run metadata and aggregated statistics
+- `activity.run_points`: Raw GPS observations with geography type
+- `activity.run_tiles`: Many-to-many association of runs to geohash tiles
+
+### Error Handling
+
+- **Validation errors**: 400 Bad Request
+- **Not found**: 404 Not Found
+- **Conflict** (e.g., active run exists): 409 Conflict
+- **Server errors**: 500 Internal Server Error with rollback

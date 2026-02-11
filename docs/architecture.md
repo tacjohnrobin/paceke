@@ -2,10 +2,7 @@
 
 > **Status:** Early Architecture & Data Foundation (Pre-MVP)
 >
-> **Purpose of this document:**
-> This document captures the _current, agreed-upon technical understanding_ of the PaceKE system. It is intentionally written at a **systems / backend architecture level**, not as marketing material. It serves as a living reference for contributors and for future design decisions.
 
----
 
 ## 1. Problem Definition
 
@@ -98,6 +95,134 @@ This allows:
 
 - auditability
 - rollback
+
+---
+
+## 5. Current Implementation Status
+
+### Completed Features
+
+#### Run Management
+- ✅ Start a run (create run record, validate no concurrent runs)
+- ✅ Add GPS points to a run (batch ingestion with validation)
+- ✅ End a run (mark as ended with timestamp)
+- ✅ Complete a run (finalize and calculate area covered)
+- ✅ Get run summary (retrieve statistics and computed metrics)
+
+#### GPS Point Processing
+- ✅ Point validation (accuracy, coordinates, timestamps)
+- ✅ Speed validation (detect unrealistic movement)
+- ✅ Distance computation (Haversine formula)
+- ✅ Accumulation of run statistics
+
+#### Tile System
+- ✅ Geohash conversion (precision level 7, ~150m tiles)
+- ✅ Tile discovery (on-demand creation as points are recorded)
+- ✅ Tile-to-area conversion (known area per precision level)
+- ✅ Run-tile association (many-to-many relationships)
+
+#### Data Safety
+- ✅ Transaction wrapping (atomic operations)
+- ✅ Run locking (`FOR UPDATE` to prevent concurrent modifications)
+- ✅ Serializable isolation (during run completion)
+- ✅ Rollback on error (maintain consistency)
+
+### API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Service health check |
+| POST | `/runs/start` | Start a new run |
+| POST | `/runs/:runId/points` | Add GPS points |
+| POST | `/runs/end` | End an active run |
+| GET | `/runs/:id/summary` | Get run statistics |
+| POST | `/runs/:runId/complete` | Finalize run and compute area |
+
+### Database Schema (Implemented)
+
+```sql
+-- Runs table
+CREATE TABLE activity.runs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  status VARCHAR(20) DEFAULT 'in_progress',
+  started_at TIMESTAMP NOT NULL,
+  ended_at TIMESTAMP,
+  completed_at TIMESTAMP,
+  total_distance_m DECIMAL(12, 2) DEFAULT 0,
+  run_area_m2 DECIMAL(12, 2),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- GPS Points table
+CREATE TABLE activity.run_points (
+  id SERIAL PRIMARY KEY,
+  run_id INTEGER REFERENCES activity.runs(id),
+  position GEOGRAPHY(POINT, 4326) NOT NULL,
+  recorded_at TIMESTAMP NOT NULL,
+  accuracy_m DECIMAL(5, 2),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tiles table (run-tile associations)
+CREATE TABLE activity.run_tiles (
+  id SERIAL PRIMARY KEY,
+  run_id INTEGER REFERENCES activity.runs(id),
+  geohash VARCHAR(20) NOT NULL,
+  precision INTEGER NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(run_id, geohash)
+);
+```
+
+### Validation Rules
+
+**GPS Points:**
+- Accuracy must be ≤ 25 meters
+- Latitude must be within [-90, 90]
+- Longitude must be within [-180, 180]
+- Timestamps must strictly increase
+- Instantaneous speed must be ≤ 10 m/s
+
+**Run State:**
+- User cannot have multiple concurrent active runs
+- Points can only be added to runs with `in_progress` status
+- Runs must exist before points are added
+
+### Transaction Isolation
+
+**Point Ingestion:**
+- Isolation: Default (READ COMMITTED)
+- Scope: Single run with `FOR UPDATE` lock
+- Atomicity: All points in batch or none
+
+**Run Completion:**
+- Isolation: SERIALIZABLE
+- Scope: Run-wide operation
+- Atomicity: Area calculation + status update or rollback
+
+---
+
+## 6. Future Considerations
+
+### Ownership & Fairness
+
+- Tile ownership assignment logic (currently only collecting, not assigning)
+- Fair distribution algorithms for overlapping runs
+- Dispute resolution and audit trails
+
+### Scalability
+
+- Partitioning by geohash prefix for large datasets
+- Caching strategies for frequently accessed tiles
+- Batch processing for tile_claim_events
+
+### Additional Features
+
+- Support for multiple tile precision levels (currently hardcoded to 7)
+- Route planning and replay
+- Historical leaderboards
+- User-to-territory queries
 - rule evolution
 - cheat detection
 

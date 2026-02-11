@@ -8,7 +8,7 @@ export async function completeRun(runId: number) {
   await query("BEGIN");
 
   try {
-    // 1️⃣ Lock run
+  
     const runRes = await query(
       `
       SELECT id, status
@@ -27,8 +27,7 @@ export async function completeRun(runId: number) {
       throw new Error("Run is not in progress");
     }
 
-    // 2️⃣ Count tiles by precision
-    const tilesRes = await query(
+        const tilesRes = await query(
       `
       SELECT
         precision,
@@ -54,7 +53,7 @@ export async function completeRun(runId: number) {
       totalAreaM2 += count * tileArea;
     }
 
-    // 3️⃣ Persist area + complete run
+    // Persist area + complete run
     await query(
       `
       UPDATE activity.runs
