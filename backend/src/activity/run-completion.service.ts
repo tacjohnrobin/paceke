@@ -8,10 +8,10 @@ export async function completeRun(runId: number) {
   await query("BEGIN");
 
   try {
-  
+    // 1️⃣ Lock run row
     const runRes = await query(
       `
-      SELECT id, status
+      SELECT id, user_id, status
       FROM activity.runs
       WHERE id = $1
       FOR UPDATE
@@ -23,11 +23,16 @@ export async function completeRun(runId: number) {
       throw new Error("Run not found");
     }
 
-    if (runRes.rows[0].status !== "in_progress") {
+    const run = runRes.rows[0];
+
+    if (run.status !== "in_progress") {
       throw new Error("Run is not in progress");
     }
 
-        const tilesRes = await query(
+    const userId = run.user_id;
+
+    // 2️⃣ Calculate run area from run_tiles
+    const tilesRes = await query(
       `
       SELECT
         precision,
@@ -46,6 +51,7 @@ export async function completeRun(runId: number) {
       const count = Number(row.tile_count);
 
       const tileArea = TILE_AREA_M2_BY_PRECISION[precision];
+
       if (!tileArea) {
         throw new Error(`Unsupported tile precision: ${precision}`);
       }
@@ -53,7 +59,24 @@ export async function completeRun(runId: number) {
       totalAreaM2 += count * tileArea;
     }
 
-    // Persist area + complete run
+    // 3️⃣ Apply simple territory claim logic
+    // Claim tiles that are currently unowned
+    await query(
+      `
+      INSERT INTO vbitory.tiles (tile_id, owner_id, claimed_at)
+      SELECT
+        rt.tile_id,
+        $2,
+        NOW()
+      FROM activity.run_tiles rt
+      WHERE rt.run_id = $1
+      ON CONFLICT (tile_id)
+      DO NOTHING
+      `,
+      [runId, userId]
+    );
+
+    // 4️⃣ Mark run completed
     await query(
       `
       UPDATE activity.runs
@@ -72,6 +95,7 @@ export async function completeRun(runId: number) {
       runId,
       runAreaM2: totalAreaM2,
     };
+
   } catch (err) {
     await query("ROLLBACK");
     throw err;

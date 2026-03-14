@@ -1,6 +1,6 @@
 // src/activity/tiles.service.ts
 import { query } from "../db.js";
-import { pointToGeohash } from "./utils/geohash.util.js";
+import { pointToGeohash } from "../utils/geohash.util.js";
 import type { GPSPoint } from "./runs.service.js";
 
 

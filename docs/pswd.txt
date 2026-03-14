@@ -1,0 +1,2 @@
+pswd: UJ4vgjBVj2bkQDPd
+connection: postgresql://postgres:[YOUR-PASSWORD]@db.pkpkgflzokxpfvzrjfzi.supabase.co:5432/postgres
